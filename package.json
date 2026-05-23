@@ -1,0 +1,29 @@
+{
+  "name": "hypertele-systemd",
+  "version": "1.0.0",
+  "description": "Quickly set up hypertele clients and servers as systemd services",
+  "keywords": [
+    "p2p",
+    "proxy",
+    "service",
+    "hyperswarm"
+  ],
+  "homepage": "https://github.com/RangerMauve/hypertele-systemd#readme",
+  "bugs": {
+    "url": "https://github.com/RangerMauve/hypertele-systemd/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RangerMauve/hypertele-systemd.git"
+  },
+  "license": "MIT",
+  "author": "RangerMauve",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test 'test/*.test.js'"
+  },
+  "dependencies": {
+    "hypertele": "^1.1.4"
+  }
+}
