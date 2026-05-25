@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { log, logSuccess } from '../lib/output.js'
+import { log, logSuccess } from '../src/output.js'
 
 describe('output', () => {
   it('log writes to stdout', () => {

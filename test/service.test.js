@@ -4,8 +4,8 @@ import { execSync, spawnSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { generateServerUnit, generateClientUnit, generate, writeService } from '../lib/service.js'
-import { getServiceName } from '../lib/system.js'
+import { generateServerUnit, generateClientUnit, generate, writeService } from '../src/service.js'
+import { getServiceName } from '../src/system.js'
 
 // --- helpers ---
 

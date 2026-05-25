@@ -12,7 +12,7 @@ describe('findBinaries', () => {
   })
 
   it('throws when hypertele is not on PATH', async () => {
-    const mod = await import('../lib/find-hypertele.js')
+    const mod = await import('../src/find-hypertele.js')
     // If hypertele isn't installed globally this should throw;
     // in CI or this env it likely isn't, so we expect an error.
     // If it *is* installed, we just verify the shape.

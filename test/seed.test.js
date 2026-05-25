@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { generateSeed } from '../lib/generate-seed.js'
+import { generateSeed } from '../src/generate-seed.js'
 
 describe('generateSeed', () => {
   it('returns a 64 character string', () => {

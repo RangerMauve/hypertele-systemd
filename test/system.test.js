@@ -7,7 +7,7 @@ import {
   getReloadCommand,
   getStartCommand,
   getJournalCommand,
-} from '../lib/system.js'
+} from '../src/system.js'
 
 describe('getSystemdPath', () => {
   it('defaults to /etc/systemd/system', () => {

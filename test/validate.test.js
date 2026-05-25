@@ -6,7 +6,7 @@ import {
   validatePubKey,
   validatePort,
   validateUsername,
-} from '../lib/validate.js'
+} from '../src/validate.js'
 
 describe('validateServiceName', () => {
   it('rejects empty string', () => {
