@@ -1,4 +1,8 @@
 import os from 'node:os'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+
+const runExecFile = promisify(execFile)
 
 /**
  * Return the systemd directory to write .service files into.
@@ -7,6 +11,27 @@ import os from 'node:os'
 export function getSystemdPath({ user = false } = {}) {
   if (user) return `${os.homedir()}/.config/systemd/user`
   return '/etc/systemd/system'
+}
+
+/**
+ * Run a systemctl command. Returns stdout on success, throws on failure.
+ * @param {string[]} args - command-line args after "systemctl"
+ * @param {boolean} [user=false] - use --user flag
+ * @returns {Promise<string>}
+ */
+export async function runSystemctl(args, user = false) {
+  const fullArgs = user
+    ? ['--user', ...args]
+    : args
+  try {
+    const { stdout } = await runExecFile('systemctl', fullArgs, {
+      windowsHide: true,
+    })
+    return stdout
+  } catch (err) {
+    // Re-throw with a clearer message
+    throw new Error(`systemctl ${fullArgs.join(' ')} failed: ${err.message}`)
+  }
 }
 
 /**

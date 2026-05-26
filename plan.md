@@ -2,11 +2,11 @@
 
 ## Overview
 
-A zero-dependency Node.js CLI tool that generates systemd `.service` files for
-[hypertele](https://github.com/bitfinexcom/hypertele) server and client proxies.
+A Node.js CLI tool that generates systemd `.service` files for
+[hypertele](https://github.com/bitfinexcom/hypertele) server and client proxies,
+then auto-starts them.
 
-**No external dependencies needed.** The tool generates service files and ANSI
-colored output. All logic uses only `node:` builtins.
+**Dependencies:** `commander` (CLI framework), `hyperdht` (public key derivation).
 
 ## Useful Links
 
@@ -21,8 +21,7 @@ colored output. All logic uses only `node:` builtins.
 
 **Critical CLI flags to memorize for tests + service generation:**
 
-### Server (`hypertele -l PORT`)
-**`server.js`
+### Server (`hypertele-server -l PORT`)
 | Flag | Required | Description |
 | --- | --- | --- |
 | `-l PORT` | ⚡ Yes | TCP port of the **local service to proxy**. Default `127.0.0.1` |
@@ -62,268 +61,80 @@ Server ready @<address>:<port>
 hypertele-systemd/
 ├── bin/
 │   └── hypertele-systemd.js      # CLI entry point (shebang)
-├── lib/
-│   ├── cli.js                    # argument parsing & dispatch
+├── src/
+│   ├── cli.js                    # commander program + command handlers
 │   ├── service.js                # systemd unit generation
-│   ├── system.js                 # systemctl helpers (reload prompt, etc.)
-│   └── output.js                 # ANSI/ANSI colored messages
-│   ├── find-hypertele.js          # locate hypertele & node binaries
-│   ├── generate-seed.js           # cryptographically secure seed generation
+│   ├── system.js                 # systemctl helpers (runSystemctl, reload/start commands)
+│   ├── output.js                 # log/logSuccess/logError helpers
+│   ├── find-hypertele.js         # locate hypertele & node binaries
+│   ├── generate-seed.js          # cryptographically secure seed generation
 │   └── validate.js               # input validation helpers
 ├── test/
-│   ├── find-hypertele.discover.test.js
-│   ├── seed.test.js
-│   ├── validate.test.js
-│   ├── service.test.js
+│   ├── cli.test.js               # commander program + runInit* error paths
+│   ├── find-hypertele.test.js
 │   ├── output.test.js
-│   ├── cli.parseArgs.test.js
-│   ├── service.init-server.test.js
-│   ├── service.init-client.test.js
-│   └── cli.help.test.js
-├── index.js                      # re-export everything for programmatic use
+│   ├── seed.test.js
+│   ├── service.test.js           # unit gen + systemd-analyze verify
+│   ├── system.test.js
+│   └── validate.test.js
+├── package.json
+└── node_modules/
 ```
 
 ## Implementation Approach
 
-### 7. Install dependencies
+### 1. `src/cli.js` — Commander-based CLI
 
-None. Pure `node:` only.
-
-```javascript
-// nothing to install
-```
-
-### 2. `lib/find-hypertele.js` — Locate Binaries
-
-Rely on PATH. Uses synchronous commands to find binaries on PATH.
+Uses `commander` for argument parsing, subcommand dispatch, and auto-generated `--help`.
 
 ```javascript
-import which from 'node:child_process' // no, use `command -v` or `execFile`
+import { Command } from 'commander'
+import HyperDHT from 'hyperdht'
 
-// Sync lookup:
-function findNodeBin() {
-  return process.execPath // Node's own binary path (works even under nvm)
-}
+export function createProgram() {
+  const program = new Command()
+    .name('hypertele-systemd')
+    .description('Quickly set up hypertele clients and servers as systemd services')
+    .exitOverride()
 
-function findHyperteleBin() {
-  // execSync `which hypertele` → get path to hypertele CLI
-  if (not found → throw 'hypertele not
+  program
+    .command('init-server')
+    .description('Create a hypertele server systemd service')
+    .option('--name <name>', 'Service name (required)')
+    .option('--port <port>', 'Local port to proxy (required)')
+    .option('--seed <hex>', '64-char hex seed (generated if omitted)')
+    .option('--private', 'Enable private mode')
+    .option('--compress', 'Enable compression')
+    .option('--cert-skip', 'Skip TLS cert validation')
+    .option('--user', 'Install as user service (default: system)')
+    .action(async (opts) => { ... })
 
-function findServerBin() {
-  // execSync `which hypertele-server` or `npx which hypertele-server`
-  // hypertele-server is a separate binary separate
-}
-```
+  program
+    .command('init-client')
+    .description('Create a hypertele client systemd service')
+    .option('--name <name>', 'Service name (required)')
+    .option('--port <port>', 'Local port to listen on (required)')
+    .option('--server-seed <hex>', '64-char hex seed (private mode)')
+    .option('--server-peer <hex>', '64-char hex public key (public mode)')
+    .option('--address <addr>', 'Address to listen on (default: 127.0.0.1)')
+    .option('--compress', 'Enable compression')
+    .option('--user', 'Install as user service (default: system)')
+    .action(async (opts) => { ... })
 
-**Return shape:**
-```javascript
-/// /lib/find-hypertele.js
-export function findBinaries() {
-  return {
-    node: process.execPath,       // absolute path to node
-    hypertele: '/home/user/.nvm/versions/node/v20/bin/hypertele',
-    hyperteleServer: '/home/user/.nvm/versions/node/v20/node_modules/hypertele/server.js',
-  }
-}
-```
-
-### 3. `lib/generate-seed.js` — Seed Generation
-
-Generate a **32-byte (256-bit) NaCl seed**, output as **64-char hex**.
-
-```javascript
-// lib/generate-seed.js
-import { webcrypto } from 'node:crypto'
-
-export function generateSeed() {
-  const bytes = crypto.getRandomValues(new Uint8Array(32))
-  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')
+  return program
 }
 ```
 
-### 4. `lib/service.js` — Systemd Unit Generation
-
-Generate valid systemd unit files (INI-style, `[Unit]`, `[Service]`, `[Install]` sections).
-
-```ini
-[Unit]
-Description=hypertele [name]
-After=network.target
-
-[Service]
-ExecStart=/path/to/node /path/to/server.js -l 1234 --seed <SEED>
-User=<user>
-Restart=always
-RestartSec=5
-Environment=NODE_ENV=production
-
-[Install]
-WantedBy=multi-user.target
-```
-
-**For client:**
-```ini
-[Unit]
-Description=hypertele-[name]
-After=network.target
-
-[Service]
-ExecStart=/path/to/node /path/to/hypertele -p 5678 -s <PEER_KEY>
-User=<user>
-Restart=always
-RestartSec=5
-Environment=NODE_ENV=production
-
-[Install]
-WantedBy=multi-user.target
-```
-
-**Key logic:**
-- Write to `/etc/systemd/system/` (default, needs root) or `~/.config/systemd/user/` (user services)
-- Prompt user to run `sudo systemctl daemon-reload` or `systemctl --user daemon-reload` (no auto-reload)
-
-**File location rules:**
-| `--system` flag | Path |
-| --- | --- |
-| `--system` (default) | `/etc/systemd/system/` |
-| `--user` | `~/.config/systemd/user/` |
-
-### 5. `lib/output.js` — ANSI/Colored Messages
-
-ANSI color **no deps.** Colors.
+### 2. `src/system.js` — Systemctl Helpers
 
 ```javascript
-export function cyan(text) { ... }
-export function green(text) { ... }
-export function yellow(text) { ... }
-export function red(text) { ... }
-```
+import os from 'node:os'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 
-**Output messages:**
+const runExecFile = promisify(execFile)
 
-**Server init success:**
-```
-✓ Service "hypertele-[name]-server" created at:
-  /etc/systemd/system/hypertele-[name]-server.service
-
-Seed:    <SEED_HEX>
-Pub key:  <to be printed by hypertele on service startup>
-Check service logs after starting:
-  sudo journalctl -u hypertele-[name]-server.service -f
-
-To start:
-  sudo systemctl daemon-reload
-  sudo systemctl start hypertele-[name]-server.service
-
-To connect a client:
-  hypertele-systemd init-client --name myclient --server-seed <SEED_HEX> -p 1337
-```
-
-**Client init success:**
-```
-✓ Service "hypertele-[name]-client" created at:
-  /etc/systemd/hypertele-[name]-client.service
-
-Peer key: <PEER_KEY_HEX>
-Local port: <PORT>
-Check service logs after starting:
-  sudo journalctl -u hypertele-[name]-client.service -f
-
-To start:
-  sudo systemctl daemon-reload
-  sudo systemctl enable hypertele-[name]-client.service
-  sudo systemctl start hypertele-[name]-client.service
-
-📡 To use this proxy, connect your app to localhost:<PORT> (e.g. telnet localhost <PORT>)
-```
-
-### 6. `lib/validate.js` — Input Validation
-
-```javascript
-export function validateServiceName(name) {
-  // Must match: hypertele-.* (alphanumeric, hyphens)
-  // Reject if name doesn't start with 'hypertele-'
-}
-
-export function validateSeed(seed) {
-  // Must be valid hex, 64-chars (32 bytes)
-}
-
-export function validatePubKey(key) {
-  // Must be valid hex, 64-chars (32 bytes)
-}
-
-export function validatePort(port) {
-  // Number between 1-65535
-}
-
-export function validateUsername(user) {
-  // Non-empty string (let OS validate
-}
-```
-
-### 7. `bin/hypertele-systemd.js` — CLI Entry Point
-
-```
-bin/hypertele-systemd.js
-```
-
-**Commands & flags:**
-
-```
-bin/hypertele-systemd server <name> [flags]
-
-Create a hypertele server systemd service.
-
-Examples:
-  hypertele-systemd init-server --name ssh -l 22 --system
-  hypertele-systemd init-server --name ollama -l 11434 --user
-  hypertele-systemd init-server --name my-ssh -l 22 --seed DEADBEEF...
-
-Flags: --name  `<service-name>`             (req)
-       --port  `<port>`                     (req) local port to proxy
-       --seed  `<hex>`                      (opt) 32 byte hex seed (generated if omitted)
-       --private                             (opt) enable private mode
-       --user  `<user>`                     (opt) user to run as (default: current user)
-       --system                              (opt) install as system service (default)
-       --user                                (opt) install as user service
-       --help                                (opt) show help
-       --compress                            (opt) enable compression
-       --cert-skip                           (opt) skip TLS cert check
-
-bin/hypertele-systemd init-client <name>
-
-Create a hypertele client systemd service.
-
-Examples:
-  hypertele-systemd init-client --name ssh -p 1337 --server-seed DEADBEEF...
-  hypertele-systemd init-client --name ollama-server-seed DEADBEEF...
-  hypertele-systemd init-client --name myclient -p 9090 --server-peer ABC123... --user
-
-Flags: --name  `<service-name>`             (req)
-       --port  `<port>`                     (req) local port to listen on
-       --server-seed  `<hex>`               (req) server 32-byte hex seed to PRIVATE mode -- note!)
-       --server-peer  `<hex>`               (opt) server 32-byte hex public key (for public mode!)
-       --user    `<user>`                   (opt) user to run as (default: current user)
-       --system                             (opt) install as system service (default)
-       --user                               (opt) install as user service
-       --help                               (opt) show help
-       --compress                           (opt) enable compression
-       --cert-skip                          (opt) skip TLS cert check
-```
-
-**Validation rules:**
-- `init-client`: **Errors and exits** if neither `--server-seed` nor `--server-peer` is provided
-- `init-server`: auto-generates seed if `--seed` not provided
-- `--private` on server: requires `--seed` (no auto-gen recommended for private mode)
-
-**CLI argument parsing:** Manual (no minimist or yargs.)
-**ANSI colors:** Use `lib/output.js` (no dep).
-
-### 8. `lib/system.js` — Systemctl Helpers
-
-```javascript
-export function getSystemdPath({ user = false }) {
+export function getSystemdPath({ user = false } = {}) {
   if (user) return `${os.homedir()}/.config/systemd/user`
   return '/etc/systemd/system'
 }
@@ -332,7 +143,14 @@ export function getServiceName(type, name) {
   return `hypertele-${name}-${type}.service`
 }
 
-export function getReloadCommand(user) {
+// Auto daemon-reload + start the service
+export async function runSystemctl(args, user = false) {
+  const fullArgs = user ? ['--user', ...args] : args
+  const { stdout } = await runExecFile('systemctl', fullArgs)
+  return stdout
+}
+
+export function getReloadCommand(user = false) {
   return user ? 'systemctl --user daemon-reload' : 'sudo systemctl daemon-reload'
 }
 
@@ -349,157 +167,122 @@ export function getJournalCommand(user, serviceName) {
 }
 ```
 
-### 9. `index.js` — Programmatic API
+### 3. Public Key Derivation
 
-Re-export for library use:
+Uses `HyperDHT.keyPair(seed)` (the same function hypertele itself uses) to derive
+the Ed25519 public key from the seed at creation time. This lets the CLI print the
+public key immediately and suggest the `--server-peer` client command without requiring
+the user to read journal logs first.
 
 ```javascript
-// index.js
-export { initServer }      from './lib/cli.js'
-export { initClient }      from './lib/cli.js'
-export { generateSeed }    from './lib/generate-seed.js'
-export { findBinaries }    from './lib/find-hypertele.js'
-export { generate }        from './lib/service.js'
-export { validateName }    from './lib/validate.js'
+function derivePublicKey(seedHex) {
+  const seed = Buffer.from(seedHex, 'hex')
+  const keyPair = HyperDHT.keyPair(seed)
+  return keyPair.publicKey.toString('hex')
+}
 ```
+
+### 4. Auto Service Start
+
+After writing the service file, the CLI attempts to:
+1. `systemctl daemon-reload` (or `--user` variant)
+2. `systemctl enable --now <service>` (or `--user` variant)
+
+Failures are logged as warnings with the manual commands to run. The service init
+does not fail if systemctl calls fail — it only warns.
 
 ## Testing Plan (`node:test`)
 
 ```
 test/
+├── cli.test.js
+│   ├── createProgram has correct name
+│   ├── createProgram has init-server/init-client subcommands
+│   ├── init-server has expected options (--name, --port, --seed, --private, --compress, --cert-skip, --user)
+│   ├── init-client has expected options (--name, --port, --server-seed, --server-peer, --address, --compress, --user)
+│   ├── runInitServer error paths (missing name, invalid port, invalid seed, etc.)
+│   └── runInitClient error paths (missing server-seed/peer, invalid seed, etc.)
 ├── find-hypertele.test.js
 │   ├── findBinaries returns shape { node, hypertele, hyperteleServer }
 │   ├── node === process.execPath
-│   ├── hypertele Server is absolute path when found
 │   └── throws when hypertele not found
-│   ├── throws when hypertele-server not found
-│   └── Resolves both hypertele and hypertele-server if found
-│   └── Works with nvm-managed node ✅
 ├── seed.test.js
-│   ├── generatesSeed returns length
-│   ├── generatesSeed is hexadecimal ✅
-│   ├── generateSeed is valid hex
-│   ├── generateSeed is 64 chars
+│   ├── generateSeed returns 64-char hex string ✅
 │   └── generateSeed produces different values each call ✅
 ├── validate.test.js
-│   ├── validateServiceName(name) rejects empty string
-│   ├── validateServiceName('ssh') ✅
-│   ├── validateServiceName('my-service') ✅
-│   ├── validateServiceName('telp-..') ✅
-│   ├── validateSeed('DEADBEEF...64hex') ✅
-│   ├── validateSeed rejects non-hex
-│   ├── validateSeed rejects wrong length
-│   ├── validatePort(80) ✅
-│   ├── validatePort(0) rejects
-│   ├── validatePort(65536) rejects
-│   ├── validatePort('abc') rejects
-│   ├── validateUsername('root') ✅
-│   └── validateUsername('') rejects
+│   ├── validateServiceName rejects empty string, accepts valid names ✅
+│   ├── validateSeed accepts 64-char hex, rejects wrong length/non-hex ✅
+│   ├── validatePubKey same as validateSeed ✅
+│   ├── validatePort accepts 1-65535, rejects 0/65536/non-numeric ✅
+│   └── validateUsername accepts non-empty strings ✅
 ├── service.test.js
-│   ├── generateServer(config) returns valid systemd [Unit] section
-│   ├── generateServer(config) has [Service] with ExecStart with node + hypertele-server -l PORT --seed
-│   ├── generateServer(config) has [Install] with WantedBy=multi-user.target
-│   ├── generateServer(config with --private) includes --private in ExecStart
-│   ├── generateServer(config) with --compress includes --compress in ExecStart
-│   ├── generateServer(config) with --cert-skip includes --cert-skip in ExecStart
-│   ├── generateServer(config) with --cert-skip includes --cert-skip in ExecStart
-│   ├── generateClient(config) has ExecStart with -p PORT -s PEER_KEY
-│   ├── generateClient(config) has [Install]
-│   ├── generateClient(config) with --server-seed uses --private
-│   └── generateClient(config) with --server-peer uses -s PEER_KEY (no --private)
-├── system.test.js
-│   ├── getSystemdPath() defaults to /etc/systemd/system
-│   ├── getSystemdPath({ user: true }) returns ~/..../user
-│   ├── getServiceName() returns correct format
-│   ├── getReloadCommand(user) returns expected string
-│   ├── getStartCommand(style, user) returns correct format
-│   └── getJournalCommand(user) returns expected string
+│   ├── generateServerUnit valid systemd sections ✅
+│   ├── generateClientUnit valid systemd sections ✅
+│   └── systemd-analyze verify passes for both ✅
 ├── output.test.js
-│   ├── cyan(text) wraps with CSI codes
-│   ├── green(text) wraps with CSI codes
-│   ├── red(text) wraps with CSI codes
-│   ├── yellow(text) wraps with CSI codes
-│   └── Plain text passthroughs
-├── cli.help.test.js (integration-style)
-│   ├── --help flag shows help
-│   ├── init-server --help shows server help
-│   ├── init-client --help shows client help
-│   └── init-client without --server-seed or --server-peer → error
-```
-
-**Test assertions use `node:test` `assert` (assert.+):
-```javascript
-import { test, describe } from 'node:test'
-import assert from 'node:assert/strict`
-// ❌ no `node:test`
+│   ├── log writes to stdout ✅
+│   └── logSuccess/logError prefix correctly ✅
+├── system.test.js
+│   ├── getSystemdPath defaults/returns user path ✅
+│   ├── getServiceName correct format ✅
+│   ├── getReloadCommand/getStartCommand/getJournalCommand correct format ✅
+└── (all run via `node --test 'test/*.test.js'`)
 ```
 
 ## Implementation Order (TODO)
 
-- [ ] **Phase 1: Core libraries (no CLI)**
-  - [ ] `lib/generate-seed.js` + tests
-  - [ ] `lib/validate.js` + tests
-  - [ ] `lib/system.js` + tests
-  - [ ] `lib/find-hypertele.js` + tests
-  - [ ] `lib/output.js` + tests
+- [x] **Phase 1: Core libraries**
+  - [x] `src/generate-seed.js` + tests
+  - [x] `src/validate.js` + tests
+  - [x] `src/system.js` + tests (incl. `runSystemctl`)
+  - [x] `src/find-hypertele.js` + tests
+  - [x] `src/output.js` + tests
 
-- [ ] **Phase 2: Service generation**
-  - [ ] `lib/service.js` + tests
-  - [ ] Full integration: `generateServer(config)`, `generateClient(config)` pass validation
+- [x] **Phase 2: Service generation**
+  - [x] `src/service.js` (+ tests with `systemd-analyze verify`)
 
-- [ ] **Phase 3: CLI**
-  - [ ] `lib/cli.js` — manual `process.argv` parser
-  - [ ] `bin/hypertele-systemd.js` — entry point (shebang, `#!/usr/bin/env node`)
-  - [ ] Handle `init-server` and `init-client` commands
-  - [ ] `--help` flag everywhere
-  - [ ] Error handling & exiting cleanly
+- [x] **Phase 3: CLI**
+  - [x] `src/cli.js` — commander-based CLI with `init-server` / `init-client` subcommands
+  - [x] `bin/hypertele-systemd.js` — entry point
+  - [x] Auto-generated `--help` via commander
+  - [x] Public key derivation via `HyperDHT.keyPair(seed)`
+  - [x] Auto daemon-reload + start (`runSystemctl`)
+  - [x] Error handling & exit codes (0/1/2/3)
+  - [x] `test/cli.test.js`
 
 - [ ] **Phase 4: Tie-up**
+  - [ ] `index.js` — programmatic API re-exports
   - [ ] Update `package.json`: add `bin` entries, update `main` to `index.js`
   - [ ] Update `README.md` with usage examples
   - [ ] Make sure `node:test` runs all `test/*.test.js`
-  - [ ] Final review: zero external deps, all tests pass, README accurate
+  - [ ] Final review: all tests pass, README accurate
 
 ## Notes for Implementation Agents
 
-1. **ANSI colors:** Use `node:util` `util.format` or manual hex → `node:util` `hexEscape` (Node 20+)? No, just use `\x1b` codes directly in `lib/output.js`.
+1. **CLI framework:** Uses `commander` (installed, not zero-dep). Commander handles `--help`, subcommand dispatch, option parsing, and `exitOverride()` for graceful exit code control.
 
-2. **Systemd file validation:** The tool generates the file, systemd validates it when you `systemctl daemon-reload` and try to `start`. Don't try to re-implement systemd parsing.
+2. **Public key derivation:** `HyperDHT.keyPair(seed)` — same function hypertele uses internally. Derives the Ed25519 public key from the seed deterministically.
 
-3. **Seed generation:** Must be **32 bytes** = **64 hex chars**. This is NaCl secretbox seed size. `crypto.getRandomValues(new Uint8Array(32))` is the way.
+3. **Auto-start:** `runSystemctl()` uses `promisify(execFile)` from `node:child_process`. Failures warn but don't abort. Manual fallback commands printed.
 
-4. **Binary discovery:** `process.execPath` for node. `which hypertele` for hypertele. `which hypertele-server` for server. Both are npm global installs or nvm-managed. Use `shellSandbox ('which hypertele')` to find absolute paths.
+4. **No `node:child_process/promises`:** Not available in all Node versions; use `promisify(execFile)` instead.
 
-5. **No auto`systemctl` calls:** The tool **never** runs `systemctl` commands. It **only writes service files and tells the user what to run.**
+5. **Seed generation:** Must be **32 bytes** = **64 hex chars**. NaCl secretbox seed. `crypto.getRandomValues(new Uint8Array(32))`.
 
-6. **User services vs system services:** User services go to `~/.config/systemd/user/`, all other paths relative to user's home. System services go to `/etc/systemd/system/`. Both require `sudo` for `systemctl`. Both require `sudo` for `enable —-now`
+6. **Binary discovery:** `process.execPath` for node. `which hypertele` for hypertele. `which hypertele-server` for server. Both are npm global / nvm-managed.
 
-7. **hypertele's printing:** The server prints its pubkey to stdout *after startup*. The tool **cannot** intercept that. It only writes the service file and tells the user how to check logs for the pubkey (journalctl). The output tells the user to check `journalctl` for the pubkey.
+7. **User vs system services:** User → `~/.config/systemd/user/`, system → `/etc/systemd/system/`.
 
-8. **Private mode:**
-   - Server: `--private` flag
-   - Client: `--private` flag, and `-s <SEED>` (seed, not pubkey)
-   - The tool generates the seed for you. Output the seed so you can pass it to the client command.
+8. **Private mode:** Server `--private` flag. Client `--server-seed` (seed not pubkey).
 
-9. **Public mode (default):**
-   - Server: normal, prints pubkey on start
-   - Client: `-s <PUBKEY>`, uses pubkey directly
-   - The tool outputs the pubkey from `journalctl` command so user can grab it.
+9. **Public mode (default):** Server prints pubkey on start; we derive it via `HyperDHT.keyPair`. Client uses `--server-peer` with the pubkey.
 
-10. **File permissions:** `chmod 644` the generated `.service` files explicitly (good practice for systemd).
+10. **File permissions:** `chmod 644` the generated `.service` files explicitly.
 
 11. **Error exit codes:**
     - 0: success
     - 1: invalid input (validation failure)
-    - 2: not found (hypertele binary missing)
+    - 2: binary not found (hypertele missing)
     - 3: permission denied (writing to systemd path)
 
-12. **Test patterns:** Use `describe/`blocks for grouping, `assert.strictEqual` (not `===`), `assert.throws()` for errors, `match()` for service file content checks. No mocks needed — everything is pure/functions.
-
-**Testing `node:test` usage:**
-```json
-// package.json
-{
-  "scripts": {
-    "test": "node --test 'test/*.test.js'
-```
+12. **Test patterns:** `describe/test` blocks, `assert.strictEqual`, `assert.throws()`. No mocks needed — pure functions.
