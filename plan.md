@@ -250,12 +250,12 @@ test/
   - [x] Error handling & exit codes (0/1/2/3)
   - [x] `test/cli.test.js`
 
-- [ ] **Phase 4: Tie-up**
-  - [ ] `index.js` — programmatic API re-exports
-  - [ ] Update `package.json`: add `bin` entries, update `main` to `index.js`
-  - [ ] Update `README.md` with usage examples
-  - [ ] Make sure `node:test` runs all `test/*.test.js`
-  - [ ] Final review: all tests pass, README accurate
+- [x] **Phase 4: Tie-up**
+  - [x] `index.js` — programmatic API re-exports
+  - [x] Update `package.json`: add `bin` entries, update `main` to `index.js`
+  - [x] Update `README.md` with usage examples
+  - [x] Make sure `node:test` runs all `test/*.test.js` (77 tests pass)
+  - [x] Final review: all tests pass, README accurate
 
 ## Notes for Implementation Agents
 

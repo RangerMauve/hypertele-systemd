@@ -20,6 +20,9 @@
   "author": "RangerMauve",
   "type": "module",
   "main": "index.js",
+  "bin": {
+    "hypertele-systemd": "bin/hypertele-systemd.js"
+  },
   "scripts": {
     "test": "node --test 'test/*.test.js'"
   },
